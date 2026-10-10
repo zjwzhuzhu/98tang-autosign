@@ -878,6 +878,7 @@ class SignInManager:
                     if not cap_raw or cap_raw.startswith("ERR"):
                         self.logger.warning(f"获取验证码失败: {cap_raw}")
                         break
+                    self.logger.info(f"[DEBUG] 验证码原始响应(前1500): {cap_raw[:1500]}")
                     cap = _json.loads(cap_raw)
                     data = cap.get("data") or {}
                     ctype = data.get("type", "")
