@@ -806,77 +806,43 @@ class SignInManager:
 
     def _perform_direct_signin(self) -> bool:
         """
-        直接访问签到URL执行签到（绕过失效的JS按钮）
+        直接调用签到接口执行签到
 
-        该站使用 feiniao dd_sign 插件，签到端点为
-        plugin.php?id=dd_sign:sign&formhash={formhash}
+        该站 dd_sign 插件真实签到接口：plugin.php?id=dd_sign&ac=sign_v2
+        （JS 中 doSignin() 所调用；验证码通过后由前端调用）
         """
         try:
-            self.logger.info("尝试通过直接URL执行签到")
+            self.logger.info("尝试直接调用签到接口")
 
-            # 先回到签到页（点击重试过程中页面可能已被刷新/跳走）
+            # 进入签到页（建立同源上下文）
             self.driver.get(f"{self.base_url}/plugin.php?id=dd_sign:index")
             TimingManager.smart_wait(TimingManager.PAGE_LOAD_DELAY, 1.0, self.logger)
 
-            # [DEBUG] 输出签到页内联脚本与 dd_sign 插件JS，确认签到与验证码机制
-            try:
-                dump = self.driver.execute_async_script(
-                    """
-                    var cb = arguments[arguments.length - 1];
-                    var out = [];
-                    var inlines = Array.from(document.querySelectorAll('script:not([src])'));
-                    inlines.forEach(function(s, i){
-                        out.push('== INLINE ' + i + ' ==\\n' + s.textContent.substring(0, 1200));
-                    });
-                    var srcs = Array.from(document.querySelectorAll('script[src]')).map(function(s){ return s.src; });
-                    var targets = srcs.filter(function(u){ return /dd_sign|sign/i.test(u); });
-                    var next = function(i){
-                        if (i >= targets.length) { cb(out.join('\\n')); return; }
-                        fetch(targets[i]).then(function(r){ return r.text(); }).then(function(t){
-                            out.push('== SRC ' + targets[i] + ' ==\\n' + t.substring(0, 20000));
-                            next(i + 1);
-                        }).catch(function(e){ out.push('== SRC ' + targets[i] + ' ERR ' + e + ' =='); next(i + 1); });
-                    };
-                    next(0);
-                    """
-                )
-                self.logger.info(f"[DEBUG] 签到页脚本dump:\\n{dump}")
-            except Exception as e:
-                self.logger.info(f"[DEBUG] 脚本dump失败: {e}")
-
-            # 获取签到页formhash（页面加载可能较慢，重试）
-            formhash = ""
-            for _ in range(3):
-                formhash_el = self.element_finder.find_by_selectors(
-                    ["input[name='formhash']"], timeout=5
-                )
-                if formhash_el:
-                    formhash = formhash_el.get_attribute("value")
-                    break
-                TimingManager.smart_wait(2, 0, self.logger)
-            if not formhash:
-                self.logger.warning("未找到formhash，无法直接签到")
-                return False
-            self.logger.debug(f"获取到formhash: {formhash}")
-
-            # feiniao dd_sign 插件签到端点
-            direct_url = (
-                f"{self.base_url}/plugin.php?id=dd_sign:sign&formhash={formhash}"
+            # 直接调用签到接口，观察服务端是否强制要求验证码
+            resp = self.driver.execute_async_script(
+                """
+                var cb = arguments[arguments.length - 1];
+                fetch('plugin.php?id=dd_sign&ac=sign_v2')
+                    .then(function(r){ return r.text(); })
+                    .then(function(t){ cb(t); })
+                    .catch(function(e){ cb('ERR: ' + e); });
+                """
             )
-            self.logger.info(f"访问签到URL: {direct_url}")
-            self.driver.get(direct_url)
-            TimingManager.smart_wait(TimingManager.PAGE_LOAD_DELAY, 1.5, self.logger)
+            self.logger.info(f"[DEBUG] ac=sign_v2 响应: {resp}")
 
-            # 重新进入签到页确认状态
-            self.driver.get(f"{self.base_url}/plugin.php?id=dd_sign:index")
-            TimingManager.smart_wait(TimingManager.PAGE_LOAD_DELAY, 1.5, self.logger)
+            if resp and '"code":200' in resp:
+                # 接口返回成功，稍等页面刷新后确认签到状态
+                TimingManager.smart_wait(3, 1, self.logger)
+                self.driver.get(f"{self.base_url}/plugin.php?id=dd_sign:index")
+                TimingManager.smart_wait(TimingManager.PAGE_LOAD_DELAY, 1.0, self.logger)
+                status = self._check_signin_status()
+                if status == "already_signed":
+                    self.logger.info("✅ 直接接口签到成功")
+                    return True
+                self.logger.warning(f"接口返回成功但状态未确认: {status}")
+                return False
 
-            # 验证签到状态（直接检查，不再触发点击重试）
-            status = self._check_signin_status()
-            if status == "already_signed":
-                self.logger.info("✅ 直接URL签到成功")
-                return True
-            self.logger.warning(f"直接URL签到后状态: {status}")
+            self.logger.warning("直接接口未返回成功（服务端可能要求先完成验证码）")
             return False
         except Exception as e:
             self.logger.error(f"直接签到失败: {e}")
