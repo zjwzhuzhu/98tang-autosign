@@ -474,6 +474,35 @@ class SignInManager:
 
             if not question_text:
                 self.logger.info("未发现验证问题，尝试直接提交")
+                # [DEBUG] 输出页面关键信息
+                try:
+                    body_text = self.driver.execute_script(
+                        "return document.body.innerText;"
+                    ) or ""
+                    self.logger.info(
+                        f"[DEBUG] 无验证题时body文本(前1200): {body_text[:1200]}"
+                    )
+                    for sel in [
+                        "form[action*='dd_sign']",
+                        "form",
+                        "input[name='formhash']",
+                        "input[name='secanswer']",
+                        "input[id*='secqaa']",
+                        "#signform",
+                    ]:
+                        try:
+                            els = self.driver.find_elements("css selector", sel)
+                            self.logger.info(
+                                f"[DEBUG] 选择器 {sel}: 找到 {len(els)} 个"
+                            )
+                            if els:
+                                self.logger.info(
+                                    f"[DEBUG]   {sel} outerHTML: {els[0].get_attribute('outerHTML')[:500]}"
+                                )
+                        except Exception:
+                            pass
+                except Exception as e:
+                    self.logger.info(f"[DEBUG] 输出页面信息失败: {e}")
                 return True
 
             self.logger.info(f"处理验证问题: {question_text}")
@@ -706,10 +735,43 @@ class SignInManager:
                 self.logger.info(
                     f"开始点击签到按钮: '{button_text}' (标签: {button_tag}, name: {button_name})"
                 )
+                # [DEBUG] 输出签到按钮真实HTML与onclick
+                try:
+                    outer = self.driver.execute_script(
+                        "return arguments[0].outerHTML;", sign_button
+                    )
+                    self.logger.info(f"[DEBUG] 签到按钮 outerHTML: {outer}")
+                    self.logger.info(
+                        f"[DEBUG] onclick属性: {sign_button.get_attribute('onclick')}"
+                    )
+                except Exception as e:
+                    self.logger.info(f"[DEBUG] 获取签到按钮HTML失败: {e}")
+
                 BrowserHelper.safe_click(self.driver, sign_button, self.logger)
                 TimingManager.smart_wait(
                     TimingManager.PAGE_LOAD_DELAY, 1.0, self.logger
                 )
+
+                # [DEBUG] 点击后页面信息 + 处理可能的JS弹窗
+                try:
+                    self.logger.info(
+                        f"[DEBUG] 点击后URL: {self.driver.current_url}"
+                    )
+                    body_text = self.driver.execute_script(
+                        "return document.body.innerText;"
+                    ) or ""
+                    self.logger.info(
+                        f"[DEBUG] 点击后body文本(前1500): {body_text[:1500]}"
+                    )
+                except Exception as e:
+                    self.logger.info(f"[DEBUG] 获取点击后页面信息失败: {e}")
+                try:
+                    alert = self.driver.switch_to.alert
+                    self.logger.info(f"[DEBUG] 检测到JS弹窗: {alert.text}")
+                    alert.accept()
+                    self.logger.info("[DEBUG] 已接受JS弹窗")
+                except Exception:
+                    self.logger.info("[DEBUG] 无JS弹窗")
 
                 # 处理签到验证
                 if self.handle_sign_verification():
