@@ -814,16 +814,37 @@ class SignInManager:
         try:
             self.logger.info("尝试通过直接URL执行签到")
 
-            # [DEBUG] 输出页面加载的脚本，用于确认签到端点
-            try:
-                scripts = self.driver.execute_script(
-                    "return Array.from(document.querySelectorAll('script[src]')).map(s=>s.src);"
-                )
-                self.logger.info(f"[DEBUG] 页面脚本: {scripts}")
-            except Exception as e:
-                self.logger.info(f"[DEBUG] 获取脚本列表失败: {e}")
+            # 先回到签到页（点击重试过程中页面可能已被刷新/跳走）
+            self.driver.get(f"{self.base_url}/plugin.php?id=dd_sign:index")
+            TimingManager.smart_wait(TimingManager.PAGE_LOAD_DELAY, 1.0, self.logger)
 
-            # 获取当前页面formhash
+            # [DEBUG] 输出签到页内联脚本与 dd_sign 插件JS，确认签到与验证码机制
+            try:
+                dump = self.driver.execute_async_script(
+                    """
+                    var cb = arguments[arguments.length - 1];
+                    var out = [];
+                    var inlines = Array.from(document.querySelectorAll('script:not([src])'));
+                    inlines.forEach(function(s, i){
+                        out.push('== INLINE ' + i + ' ==\\n' + s.textContent.substring(0, 1200));
+                    });
+                    var srcs = Array.from(document.querySelectorAll('script[src]')).map(function(s){ return s.src; });
+                    var targets = srcs.filter(function(u){ return /dd_sign|sign/i.test(u); });
+                    var next = function(i){
+                        if (i >= targets.length) { cb(out.join('\\n')); return; }
+                        fetch(targets[i]).then(function(r){ return r.text(); }).then(function(t){
+                            out.push('== SRC ' + targets[i] + ' ==\\n' + t.substring(0, 3000));
+                            next(i + 1);
+                        }).catch(function(e){ out.push('== SRC ' + targets[i] + ' ERR ' + e + ' =='); next(i + 1); });
+                    };
+                    next(0);
+                    """
+                )
+                self.logger.info(f"[DEBUG] 签到页脚本dump:\\n{dump}")
+            except Exception as e:
+                self.logger.info(f"[DEBUG] 脚本dump失败: {e}")
+
+            # 获取签到页formhash
             formhash_el = self.element_finder.find_by_selectors(
                 ["input[name='formhash']"], timeout=5
             )
