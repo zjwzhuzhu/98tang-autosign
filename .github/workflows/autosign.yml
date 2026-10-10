@@ -116,6 +116,7 @@ jobs:
         MAX_LOG_FILES: ${{ vars.MAX_LOG_FILES || '7' }}
         MAX_RETRIES: ${{ vars.MAX_RETRIES || '3' }}
         TIMEOUT_MINUTES: ${{ vars.TIMEOUT_MINUTES || '5' }}
+        CAPTCHA_MAX_ATTEMPTS: ${{ vars.CAPTCHA_MAX_ATTEMPTS || '2' }}  # 每天验证码尝试次数，保留配额给手动签到
         
         # 中文字体和编码支持
         LANG: 'zh_CN.UTF-8'
@@ -241,6 +242,7 @@ jobs:
         MAX_LOG_FILES: ${{ vars.MAX_LOG_FILES || '7' }}
         MAX_RETRIES: ${{ vars.MAX_RETRIES || '3' }}
         TIMEOUT_MINUTES: ${{ vars.TIMEOUT_MINUTES || '5' }}
+        CAPTCHA_MAX_ATTEMPTS: ${{ vars.CAPTCHA_MAX_ATTEMPTS || '2' }}  # 每天验证码尝试次数，保留配额给手动签到
         
         # 中文字体和编码支持
         LANG: 'zh_CN.UTF-8'
