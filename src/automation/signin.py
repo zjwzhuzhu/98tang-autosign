@@ -44,6 +44,9 @@ class SignInManager:
         self.security_answer = config.get("security_answer", "")
         self.security_question = config.get("security_question", "")
 
+        # 签到点击尝试次数（防止按钮点击方式无限重试）
+        self._signin_click_attempts = 0
+
     def handle_age_verification(self) -> bool:
         """
         处理年龄验证
@@ -595,7 +598,12 @@ class SignInManager:
                 return False
 
             # 执行签到操作
-            return self._perform_signin_action()
+            self._signin_click_attempts = 0
+            result = self._perform_signin_action()
+            if not result:
+                self.logger.warning("按钮点击签到失败，尝试直接访问签到URL")
+                result = self._perform_direct_signin()
+            return result
 
         except Exception as e:
             self.logger.error(f"签到失败: {e}")
@@ -669,6 +677,12 @@ class SignInManager:
             是否签到成功
         """
         try:
+            # 防止按钮点击方式无限重试（_perform_signin_action 与 _verify_signin_success 互相递归）
+            self._signin_click_attempts += 1
+            if self._signin_click_attempts > 4:
+                self.logger.error("签到按钮点击尝试次数超限，停止按钮点击方式")
+                return False
+
             # 扩展签到按钮选择器，支持button和a标签
             sign_button_selectors = [
                 # 原有的a标签选择器
@@ -788,6 +802,58 @@ class SignInManager:
 
         except Exception as e:
             self.logger.error(f"执行签到操作时出错: {e}")
+            return False
+
+    def _perform_direct_signin(self) -> bool:
+        """
+        直接访问签到URL执行签到（绕过失效的JS按钮）
+
+        该站使用 feiniao dd_sign 插件，签到端点为
+        plugin.php?id=dd_sign:sign&formhash={formhash}
+        """
+        try:
+            self.logger.info("尝试通过直接URL执行签到")
+
+            # [DEBUG] 输出页面加载的脚本，用于确认签到端点
+            try:
+                scripts = self.driver.execute_script(
+                    "return Array.from(document.querySelectorAll('script[src]')).map(s=>s.src);"
+                )
+                self.logger.info(f"[DEBUG] 页面脚本: {scripts}")
+            except Exception as e:
+                self.logger.info(f"[DEBUG] 获取脚本列表失败: {e}")
+
+            # 获取当前页面formhash
+            formhash_el = self.element_finder.find_by_selectors(
+                ["input[name='formhash']"], timeout=5
+            )
+            if not formhash_el:
+                self.logger.warning("未找到formhash，无法直接签到")
+                return False
+            formhash = formhash_el.get_attribute("value")
+            self.logger.debug(f"获取到formhash: {formhash}")
+
+            # feiniao dd_sign 插件签到端点
+            direct_url = (
+                f"{self.base_url}/plugin.php?id=dd_sign:sign&formhash={formhash}"
+            )
+            self.logger.info(f"访问签到URL: {direct_url}")
+            self.driver.get(direct_url)
+            TimingManager.smart_wait(TimingManager.PAGE_LOAD_DELAY, 1.5, self.logger)
+
+            # 重新进入签到页确认状态
+            self.driver.get(f"{self.base_url}/plugin.php?id=dd_sign:index")
+            TimingManager.smart_wait(TimingManager.PAGE_LOAD_DELAY, 1.5, self.logger)
+
+            # 验证签到状态（直接检查，不再触发点击重试）
+            status = self._check_signin_status()
+            if status == "already_signed":
+                self.logger.info("✅ 直接URL签到成功")
+                return True
+            self.logger.warning(f"直接URL签到后状态: {status}")
+            return False
+        except Exception as e:
+            self.logger.error(f"直接签到失败: {e}")
             return False
 
     def _navigate_to_signin_page(self) -> bool:
