@@ -907,11 +907,13 @@ class SignInManager:
                         value = f"{gap[0]},{gap[1]}"
                         self.logger.info(f"识别缺口: {gap}")
                     elif ctype == "click":
-                        self.logger.warning("click 类型暂未支持，跳过本次")
-                        return False
+                        self.logger.warning("click 类型暂未支持，换一张验证码重试")
+                        TimingManager.smart_wait(2, 1, self.logger)
+                        continue
                     else:
-                        self.logger.warning(f"类型 {ctype} 暂未支持")
-                        return False
+                        self.logger.warning(f"类型 {ctype} 暂未支持，换一张验证码重试")
+                        TimingManager.smart_wait(2, 1, self.logger)
+                        continue
 
                     # 2. 提交校验
                     check = self.driver.execute_async_script(
