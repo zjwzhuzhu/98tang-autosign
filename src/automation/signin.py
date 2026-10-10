@@ -599,11 +599,7 @@ class SignInManager:
 
             # 执行签到操作
             self._signin_click_attempts = 0
-            result = self._perform_signin_action()
-            if not result:
-                self.logger.warning("按钮点击签到失败，尝试直接访问签到URL")
-                result = self._perform_direct_signin()
-            return result
+            return self._solve_gocaptcha_and_signin()
 
         except Exception as e:
             self.logger.error(f"签到失败: {e}")
@@ -846,6 +842,130 @@ class SignInManager:
             return False
         except Exception as e:
             self.logger.error(f"直接签到失败: {e}")
+            return False
+
+    def _solve_gocaptcha_and_signin(self) -> bool:
+        """
+        自动处理 GoCaptcha 验证码并完成签到
+
+        该站 dd_sign 插件签到前必须通过 GoCaptcha 验证：
+          1. 生成验证码:  GET  misc.php?mod=captcha
+          2. 提交校验:    POST misc.php?mod=captcha&action=check  body="x,y"（缺口坐标）
+          3. 校验通过后:  GET  plugin.php?id=dd_sign&ac=sign_v2  完成签到
+        slide/drag 类型可直接用缺口坐标 POST，无需真实拖拽。
+        """
+        import json as _json
+
+        try:
+            self.logger.info("开始 GoCaptcha 自动处理")
+
+            # 确保在签到页（同源上下文）
+            self.driver.get(f"{self.base_url}/plugin.php?id=dd_sign:index")
+            TimingManager.smart_wait(TimingManager.PAGE_LOAD_DELAY, 1.0, self.logger)
+
+            for attempt in range(5):
+                try:
+                    # 1. 生成验证码
+                    cap_raw = self.driver.execute_async_script(
+                        """
+                        var cb = arguments[arguments.length - 1];
+                        fetch('misc.php?mod=captcha')
+                            .then(function(r){ return r.json(); })
+                            .then(function(j){ cb(JSON.stringify(j)); })
+                            .catch(function(e){ cb('ERR:' + e); });
+                        """
+                    )
+                    if not cap_raw or cap_raw.startswith("ERR"):
+                        self.logger.warning(f"获取验证码失败: {cap_raw}")
+                        break
+                    cap = _json.loads(cap_raw)
+                    data = cap.get("data") or {}
+                    ctype = data.get("type", "")
+                    self.logger.info(f"验证码类型: {ctype} (第{attempt + 1}次)")
+
+                    master_b64 = data.get("master_image_base64", "")
+                    thumb_b64 = data.get("thumb_image_base64", "")
+                    if master_b64:
+                        self.logger.debug(
+                            f"背景图base64长度: {len(master_b64)}, "
+                            f"拼图块base64长度: {len(thumb_b64)}"
+                        )
+
+                    if ctype in ("slide", "drag"):
+                        from ..utils.gocaptcha_solver import detect_gap
+
+                        gap = detect_gap(master_b64, thumb_b64)
+                        if not gap:
+                            self.logger.warning("缺口识别失败，重试")
+                            TimingManager.smart_wait(2, 1, self.logger)
+                            continue
+                        value = f"{gap[0]},{gap[1]}"
+                        self.logger.info(f"识别缺口: {gap}")
+                    elif ctype == "click":
+                        self.logger.warning("click 类型暂未支持，跳过本次")
+                        return False
+                    else:
+                        self.logger.warning(f"类型 {ctype} 暂未支持")
+                        return False
+
+                    # 2. 提交校验
+                    check = self.driver.execute_async_script(
+                        """
+                        var cb = arguments[arguments.length - 1];
+                        var value = arguments[0];
+                        fetch('misc.php?mod=captcha&action=check', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'text/plain' },
+                            body: value
+                        }).then(function(r){ return r.json(); })
+                          .then(function(j){ cb(JSON.stringify(j)); })
+                          .catch(function(e){ cb('ERR:' + e); });
+                        """,
+                        value,
+                    )
+                    self.logger.info(f"校验响应: {check}")
+                    if not check or check.startswith("ERR"):
+                        continue
+                    ck = _json.loads(check)
+                    if ck.get("data") != "ok":
+                        self.logger.warning(f"验证未通过: {ck.get('message') or ck}")
+                        TimingManager.smart_wait(2, 1, self.logger)
+                        continue
+
+                    # 3. 校验通过，调用签到接口
+                    sign = self.driver.execute_async_script(
+                        """
+                        var cb = arguments[arguments.length - 1];
+                        fetch('plugin.php?id=dd_sign&ac=sign_v2')
+                            .then(function(r){ return r.json(); })
+                            .then(function(j){ cb(JSON.stringify(j)); })
+                            .catch(function(e){ cb('ERR:' + e); });
+                        """
+                    )
+                    self.logger.info(f"签到接口响应: {sign}")
+                    if sign and '"code":200' in sign:
+                        TimingManager.smart_wait(3, 1, self.logger)
+                        self.driver.get(
+                            f"{self.base_url}/plugin.php?id=dd_sign:index"
+                        )
+                        TimingManager.smart_wait(
+                            TimingManager.PAGE_LOAD_DELAY, 1.0, self.logger
+                        )
+                        if self._check_signin_status() == "already_signed":
+                            self.logger.info("✅ GoCaptcha 验证 + 签到成功")
+                            return True
+                        self.logger.warning("接口成功但状态未确认")
+                        return False
+                    self.logger.warning(f"签到接口未成功: {sign}")
+                    return False
+                except Exception as e:
+                    self.logger.warning(f"GoCaptcha 处理异常: {e}")
+                    TimingManager.smart_wait(2, 1, self.logger)
+
+            self.logger.error("GoCaptcha 自动处理多次尝试后仍未成功")
+            return False
+        except Exception as e:
+            self.logger.error(f"GoCaptcha 处理失败: {e}")
             return False
 
     def _navigate_to_signin_page(self) -> bool:
