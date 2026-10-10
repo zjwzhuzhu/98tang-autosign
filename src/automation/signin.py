@@ -865,8 +865,8 @@ class SignInManager:
             TimingManager.smart_wait(TimingManager.PAGE_LOAD_DELAY, 1.0, self.logger)
 
             # 尝试次数可配置：站点对每日验证码生成次数有限额，
-            # 默认每次运行最多 2 次，把剩余配额留给手动签到
-            max_attempts = int(os.environ.get("CAPTCHA_MAX_ATTEMPTS", "2"))
+            # 每天最多 5 次，给手动签到至少留 2 次
+            max_attempts = int(os.environ.get("CAPTCHA_MAX_ATTEMPTS", "5"))
             for attempt in range(max_attempts):
                 try:
                     # 1. 生成验证码
