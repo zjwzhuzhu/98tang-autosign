@@ -833,7 +833,7 @@ class SignInManager:
                     var next = function(i){
                         if (i >= targets.length) { cb(out.join('\\n')); return; }
                         fetch(targets[i]).then(function(r){ return r.text(); }).then(function(t){
-                            out.push('== SRC ' + targets[i] + ' ==\\n' + t.substring(0, 3000));
+                            out.push('== SRC ' + targets[i] + ' ==\\n' + t.substring(0, 20000));
                             next(i + 1);
                         }).catch(function(e){ out.push('== SRC ' + targets[i] + ' ERR ' + e + ' =='); next(i + 1); });
                     };
@@ -844,14 +844,19 @@ class SignInManager:
             except Exception as e:
                 self.logger.info(f"[DEBUG] 脚本dump失败: {e}")
 
-            # 获取签到页formhash
-            formhash_el = self.element_finder.find_by_selectors(
-                ["input[name='formhash']"], timeout=5
-            )
-            if not formhash_el:
+            # 获取签到页formhash（页面加载可能较慢，重试）
+            formhash = ""
+            for _ in range(3):
+                formhash_el = self.element_finder.find_by_selectors(
+                    ["input[name='formhash']"], timeout=5
+                )
+                if formhash_el:
+                    formhash = formhash_el.get_attribute("value")
+                    break
+                TimingManager.smart_wait(2, 0, self.logger)
+            if not formhash:
                 self.logger.warning("未找到formhash，无法直接签到")
                 return False
-            formhash = formhash_el.get_attribute("value")
             self.logger.debug(f"获取到formhash: {formhash}")
 
             # feiniao dd_sign 插件签到端点
