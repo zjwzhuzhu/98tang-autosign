@@ -863,7 +863,8 @@ class SignInManager:
             self.driver.get(f"{self.base_url}/plugin.php?id=dd_sign:index")
             TimingManager.smart_wait(TimingManager.PAGE_LOAD_DELAY, 1.0, self.logger)
 
-            for attempt in range(5):
+            # 尝试次数有限制：站点对每日验证码生成次数有限额，单次运行尽量少消耗
+            for attempt in range(3):
                 try:
                     # 1. 生成验证码
                     cap_raw = self.driver.execute_async_script(
