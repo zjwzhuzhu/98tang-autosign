@@ -914,19 +914,25 @@ class SignInManager:
                             self.logger.warning("缺口识别失败，重试")
                             TimingManager.smart_wait(2, 1, self.logger)
                             continue
-                        # 提交坐标假设轮换：偶数次提交缺口绝对坐标（已验证可行），
-                        # 奇数次提交相对初始位移 gap-display（覆盖另一种坐标语义）
-                        if attempt % 2 == 1 and display_x is not None:
-                            value = (
-                                f"{gap[0] - int(display_x)},"
-                                f"{gap[1] - int(display_y or 0)}"
-                            )
+                        gx, gy, aox, aoy = gap
+                        # SlideRegion(drag) 组件 confirm 报告的是 thumb 画布位置，
+                        # 服务端答案 = 缺口位置 - 画布内透明偏移（实测 (7,2)）；
+                        # Slide 组件报告可见块位置（2026-10-11 实测直接提交缺口坐标可过），
+                        # 但为保险起见按次轮换两种语义。
+                        if ctype == "drag":
+                            value = f"{gx - aox},{gy - aoy}"
                             self.logger.info(
-                                f"识别缺口: {gap}，提交相对位移: {value}"
+                                f"识别缺口: ({gx},{gy})，alpha偏移: ({aox},{aoy})，"
+                                f"提交画布坐标: {value}"
+                            )
+                        elif attempt % 2 == 1:
+                            value = f"{gx - aox},{gy - aoy}"
+                            self.logger.info(
+                                f"识别缺口: ({gx},{gy})，提交画布坐标: {value}"
                             )
                         else:
-                            value = f"{gap[0]},{gap[1]}"
-                            self.logger.info(f"识别缺口: {gap}，提交绝对坐标: {value}")
+                            value = f"{gx},{gy}"
+                            self.logger.info(f"识别缺口: ({gx},{gy})，提交绝对坐标: {value}")
                     elif ctype == "click":
                         self.logger.warning("click 类型暂未支持，换一张验证码重试")
                         TimingManager.smart_wait(2, 1, self.logger)
