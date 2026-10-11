@@ -135,6 +135,16 @@ jobs:
         
         python main.py
         
+    - name: 上传日志与验证码图片
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: autosign-logs-${{ github.run_number }}
+        path: |
+          logs/
+        retention-days: 7
+        if-no-files-found: ignore
+
     - name: 执行结果通知
       if: always()
       run: |
