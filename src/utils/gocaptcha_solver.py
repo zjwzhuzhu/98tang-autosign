@@ -43,10 +43,11 @@ def _crop_alpha(img, thresh=8):
 
 def detect_gap(master_b64, thumb_b64):
     """
-    定位滑块缺口在背景图中的左上角 (x, y)。
+    定位拼图缺口在背景图中的可见块左上角 (x, y)，并返回 thumb 画布内可见块的
+    alpha 偏移 (ox, oy)——服务端记录的答案是「画布位置」，画布位置 = 缺口位置 - 偏移。
 
     使用 Canny 边缘模板匹配 + 掩码 SQDIFF 兜底，二者一致(±3px)时取均值。
-    返回 (x, y) 或 None。
+    返回 (x, y, ox, oy) 或 None。
     """
     bg = decode_image(master_b64)
     if bg is None:
@@ -54,13 +55,22 @@ def detect_gap(master_b64, thumb_b64):
     if bg.ndim == 3 and bg.shape[2] == 4:
         bg = cv2.cvtColor(bg, cv2.COLOR_BGRA2BGR)
 
-    pc = _crop_alpha(decode_image(thumb_b64))
+    pc_raw = decode_image(thumb_b64)
+    pc = _crop_alpha(pc_raw)
     if pc is None:
         return None
     if pc.ndim == 3:
         pc = cv2.cvtColor(
             pc, cv2.COLOR_BGRA2BGR if pc.shape[2] == 4 else cv2.COLOR_BGR2GRAY
         )
+
+    # 可见块在画布内的偏移（生成器固定内边距，如 (7,2)）
+    ox, oy = 0, 0
+    if pc_raw is not None and pc_raw.ndim == 3 and pc_raw.shape[2] == 4:
+        alpha = pc_raw[:, :, 3]
+        ys_a, xs_a = np.where(alpha > 8)
+        if len(xs_a):
+            ox, oy = int(xs_a.min()), int(ys_a.min())
 
     bgg = cv2.cvtColor(bg, cv2.COLOR_BGR2GRAY)
     pcg = pc if pc.ndim == 2 else cv2.cvtColor(pc, cv2.COLOR_BGR2GRAY)
@@ -101,9 +111,9 @@ def detect_gap(master_b64, thumb_b64):
 
     # 3) 投票
     if best and sq and abs(best[0] - sq[0]) <= 3:
-        return (int(round((best[0] + sq[0]) / 2)), best[1])
+        return (int(round((best[0] + sq[0]) / 2)), best[1], ox, oy)
     if best:
-        return (best[0], best[1])
+        return (best[0], best[1], ox, oy)
     if sq:
-        return (sq[0], sq[1])
+        return (sq[0], sq[1], ox, oy)
     return None
