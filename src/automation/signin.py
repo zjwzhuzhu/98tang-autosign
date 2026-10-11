@@ -890,11 +890,21 @@ class SignInManager:
 
                     master_b64 = data.get("master_image_base64", "")
                     thumb_b64 = data.get("thumb_image_base64", "")
-                    if master_b64:
-                        self.logger.debug(
-                            f"背景图base64长度: {len(master_b64)}, "
-                            f"拼图块base64长度: {len(thumb_b64)}"
+                    display_x = data.get("display_x")
+                    display_y = data.get("display_y")
+                    self.logger.debug(
+                        f"背景图base64长度: {len(master_b64)}, "
+                        f"拼图块base64长度: {len(thumb_b64)}, "
+                        f"display_x: {display_x}, display_y: {display_y}"
+                    )
+
+                    # 保存验证码图片到 logs/captcha/ 供离线校准识别算法
+                    try:
+                        self._dump_captcha_images(
+                            ctype, attempt, master_b64, thumb_b64
                         )
+                    except Exception as e:
+                        self.logger.debug(f"保存验证码图片失败: {e}")
 
                     if ctype in ("slide", "drag"):
                         from ..utils.gocaptcha_solver import detect_gap
@@ -904,8 +914,19 @@ class SignInManager:
                             self.logger.warning("缺口识别失败，重试")
                             TimingManager.smart_wait(2, 1, self.logger)
                             continue
-                        value = f"{gap[0]},{gap[1]}"
-                        self.logger.info(f"识别缺口: {gap}")
+                        # 提交坐标假设轮换：偶数次提交缺口绝对坐标（已验证可行），
+                        # 奇数次提交相对初始位移 gap-display（覆盖另一种坐标语义）
+                        if attempt % 2 == 1 and display_x is not None:
+                            value = (
+                                f"{gap[0] - int(display_x)},"
+                                f"{gap[1] - int(display_y or 0)}"
+                            )
+                            self.logger.info(
+                                f"识别缺口: {gap}，提交相对位移: {value}"
+                            )
+                        else:
+                            value = f"{gap[0]},{gap[1]}"
+                            self.logger.info(f"识别缺口: {gap}，提交绝对坐标: {value}")
                     elif ctype == "click":
                         self.logger.warning("click 类型暂未支持，换一张验证码重试")
                         TimingManager.smart_wait(2, 1, self.logger)
@@ -974,6 +995,24 @@ class SignInManager:
         except Exception as e:
             self.logger.error(f"GoCaptcha 处理失败: {e}")
             return False
+
+    def _dump_captcha_images(self, ctype, attempt, master_b64, thumb_b64):
+        """把验证码图片存到 logs/captcha/，便于离线校准识别算法（随 artifact 上传）"""
+        import base64 as _b64
+        import os as _os
+
+        out_dir = _os.path.join("logs", "captcha")
+        _os.makedirs(out_dir, exist_ok=True)
+        for name, b64 in (("master", master_b64), ("thumb", thumb_b64)):
+            if not b64:
+                continue
+            raw = b64.split(",", 1)[1] if b64.startswith("data:") else b64
+            data = _b64.b64decode(raw)
+            ext = "jpg" if "image/jpeg" in b64[:40] else "png"
+            path = _os.path.join(out_dir, f"{attempt + 1}_{ctype}_{name}.{ext}")
+            with open(path, "wb") as f:
+                f.write(data)
+        self.logger.debug(f"验证码图片已保存到 {out_dir}")
 
     def _navigate_to_signin_page(self) -> bool:
         """
