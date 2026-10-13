@@ -4,9 +4,11 @@ name: 98tang Auto Sign-in
 
 on:
   schedule:
-    # 每天北京时间0:00执行 (UTC+8，北京时间0点 = UTC 16点)
-    # 注意：schedule 只在默认分支(main)上运行
-    - cron: '0 16 * * *'
+    # 每天北京时间 00:00 / 08:00 / 12:00 各触发一次（多路冗余：已签到的运行会自动跳过，不消耗验证码配额）
+    # 注意：schedule 只在默认分支(main)上运行；fork 上定时默认禁用，需在 Actions 页点 Enable workflow 显式启用
+    - cron: '0 16 * * *'   # 北京时间 00:00
+    - cron: '0 0 * * *'    # 北京时间 08:00
+    - cron: '0 4 * * *'    # 北京时间 12:00
   workflow_dispatch:
     # 允许手动触发 - 可在任何分支运行
   push:
