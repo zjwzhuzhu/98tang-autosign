@@ -34,12 +34,12 @@ def main():
         return 0
 
     # 2. 定时事件 (schedule)：
-    # 计算今日动态随机平滑抖动：60秒 ~ 900秒 (1 ~ 15分钟)
+    # 计算今日动态随机平滑抖动：60秒 ~ 540秒 (1 ~ 9分钟)
     # 结合 GitHub 自身 runner 调度 5~60分钟的自然排队延迟，
     # 实际签到时间在 00:xx ~ 08:xx 窗口内完全离散分布。
     salt = "98tang_random_sign_seed"
     h = int(hashlib.md5(f"{today_str}_{salt}".encode()).hexdigest(), 16)
-    jitter_sec = 60 + (h % 840)  # 60 ~ 899 秒 (1~15分钟)
+    jitter_sec = 60 + (h % 480)  # 60 ~ 539 秒 (1~9分钟)
     jitter_min = round(jitter_sec / 60, 1)
 
     print(
