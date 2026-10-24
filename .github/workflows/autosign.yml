@@ -67,22 +67,18 @@ jobs:
           echo "✅ 随机抖动等待完成，进入签到流程！"
         fi
         
-    - name: 安装系统依赖和中文字体
+    - name: 安装系统依赖和中文字体（限时，失败不阻塞签到）
       if: steps.schedule_check.outputs.should_run == 'true'
       run: |
-        # 更新包管理器
-        sudo apt-get update
-        
-        # 安装中文字体支持
-        sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra
-        sudo apt-get install -y language-pack-zh-hans
-        
-        # 设置字体缓存
-        sudo fc-cache -fv
-        
-        # 验证中文字体安装
-        echo "✅ 已安装的中文字体:"
-        fc-list :lang=zh | head -5
+        # 2026-10-24 事故：Azure 归档源下载 206MB 中文字体包耗时 29 分钟，撞 30 分钟 job 超时被取消。
+        # 字体仅影响页面渲染观感；签到走 DOM 操作 + base64 验证码图片，不依赖字体。
+        # 因此限时安装轻量字体包，任何失败都继续执行主流程。
+        sudo apt-get update -o Acquire::http::Timeout=15 || true
+        timeout 180 sudo apt-get install -y --no-install-recommends fonts-noto-cjk language-pack-zh-hans \
+          || echo "⚠️ 字体安装超时/失败，继续执行（DOM 签到不依赖字体）"
+        sudo fc-cache -fv || true
+        echo "✅ 字体配置步骤完成（超时保护已启用）:"
+        fc-list :lang=zh 2>/dev/null | head -3 || echo "(无中文字体，不影响 DOM 签到)"
         
     - name: 安装Python依赖
       if: steps.schedule_check.outputs.should_run == 'true'
@@ -208,21 +204,15 @@ jobs:
       with:
         python-version: '3.11'
         
-    - name: 安装系统依赖和中文字体
+    - name: 安装系统依赖和中文字体（限时，失败不阻塞签到）
       run: |
-        # 更新包管理器
-        sudo apt-get update
-        
-        # 安装中文字体支持
-        sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra
-        sudo apt-get install -y language-pack-zh-hans
-        
-        # 设置字体缓存
-        sudo fc-cache -fv
-        
-        # 验证中文字体安装
-        echo "✅ 已安装的中文字体:"
-        fc-list :lang=zh | head -5
+        # 与主 job 相同的限时字体安装策略（2026-10-24 事故修复）
+        sudo apt-get update -o Acquire::http::Timeout=15 || true
+        timeout 180 sudo apt-get install -y --no-install-recommends fonts-noto-cjk language-pack-zh-hans \
+          || echo "⚠️ 字体安装超时/失败，继续执行（DOM 签到不依赖字体）"
+        sudo fc-cache -fv || true
+        echo "✅ 字体配置步骤完成（超时保护已启用）:"
+        fc-list :lang=zh 2>/dev/null | head -3 || echo "(无中文字体，不影响 DOM 签到)"
         
     - name: 安装Python依赖
       run: |
