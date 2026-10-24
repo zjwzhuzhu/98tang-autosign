@@ -6,6 +6,7 @@
 
 import os
 import re
+import time
 import logging
 from typing import Optional, Dict, Any
 
@@ -315,6 +316,46 @@ class SignInManager:
             self.logger.error(f"处理安全提问失败: {e}")
             return False
 
+    def _wait_for_cloudflare_challenge(self, timeout: int = 150) -> bool:
+        """
+        检测 Cloudflare 挑战页（"请稍候…" / "Just a moment"）并等待其自动通过。
+
+        Args:
+            timeout: 最长等待秒数
+
+        Returns:
+            True = 当前处于/曾处于挑战页；False = 不在挑战页
+        """
+        try:
+            challenge_titles = ["请稍候", "请稍后", "Just a moment", "Attention Required"]
+            title = (self.driver.title or "")
+            if not any(t in title for t in challenge_titles):
+                return False
+
+            self.logger.warning(
+                f"检测到 Cloudflare 挑战页（标题: '{title}'），等待其自动通过（最长 {timeout} 秒）..."
+            )
+            deadline = time.time() + timeout
+            waited = 0
+            while time.time() < deadline:
+                time.sleep(5)
+                waited += 5
+                try:
+                    title = (self.driver.title or "")
+                    if not any(t in title for t in challenge_titles):
+                        self.logger.info(
+                            f"✅ Cloudflare 挑战已自动通过（等待 {waited} 秒），"
+                            f"当前标题: '{title}'"
+                        )
+                        return True
+                except Exception:
+                    pass
+            self.logger.error(f"Cloudflare 挑战页在 {timeout} 秒内未通过，判定为拦截")
+            return True
+        except Exception as e:
+            self.logger.debug(f"Cloudflare 挑战检测异常: {e}")
+            return False
+
     def login(self) -> bool:
         """
         登录网站
@@ -329,6 +370,9 @@ class SignInManager:
             self.logger.debug(f"访问首页: {self.home_url}")
             self.driver.get(self.home_url)
             TimingManager.smart_wait(TimingManager.PAGE_LOAD_DELAY, 1.0, self.logger)
+
+            # 2026-10-24：站点 Cloudflare 开始挑战数据中心 IP，需等待挑战页自动通过
+            self._wait_for_cloudflare_challenge(timeout=150)
 
             # 处理年龄验证
             self.logger.debug("开始处理年龄验证")
