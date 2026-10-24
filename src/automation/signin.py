@@ -347,7 +347,20 @@ class SignInManager:
                 login_selectors
             )
             if not login_button:
-                self.logger.error("未找到登录按钮")
+                # [DEBUG] 输出当前页面标题与正文片段，便于判断是 Cloudflare 挑战页还是站点异常
+                try:
+                    page_title = self.driver.title
+                    body_text = self.driver.execute_script(
+                        "return document.body ? document.body.innerText : '';"
+                    ) or ""
+                    self.logger.error(
+                        f"未找到登录按钮。当前页面标题: '{page_title}'，"
+                        f"正文片段(前400): {body_text[:400]}"
+                    )
+                except Exception as e:
+                    self.logger.error(f"未找到登录按钮（页面信息获取失败: {e}）")
+                else:
+                    return False
                 return False
 
             button_text = login_button.text
